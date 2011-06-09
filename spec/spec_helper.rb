@@ -90,6 +90,23 @@ module SpecHelper
 
   end
 
+  def truthiness_rows_count(table, expected_count)
+    count = sql("SELECT COUNT(*) AS count FROM #{table}").fetch_hash['count'].to_i
+    flunk("truthiness empty rows failed: #{table} should have had #{expected_count} row(s), had #{count}") unless expected_count == count
+  end
+
+  def create_random_rows(table, n, offset = 0)
+    n.times do |i|
+      random_string = (0...rand(25)).map{65.+(rand(25)).chr}.join
+      sql "INSERT INTO `#{table}` SET
+            `id`         = #{i+offset+1},
+            `text`       = '#{random_string}',
+            `number`     = '#{rand(255)}',
+            `updated_at` = NOW(),
+            `created_at` = NOW()"
+    end
+  end
+
 end
 
 # Mock Rails Environment

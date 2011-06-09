@@ -40,17 +40,29 @@ describe "LargeHadronMigration", "integration" do
       t.timestamps
     end
 
-    1200.times do |i|
-      random_string = (0...rand(25)).map{65.+(rand(25)).chr}.join
-      sql "INSERT INTO `addscolumn` SET
-            `id`         = #{i+1},
-            `text`       = '#{random_string}',
-            `number`     = '#{rand(255)}',
-            `updated_at` = NOW(),
-            `created_at` = NOW()"
-    end
+    create_random_rows("addscolumn", 1200)
 
     ghost = AddNewColumn.up
+
+    truthiness_rows "addscolumn", ghost
+  end
+
+  it "should not finalize when instructed not to" do
+    table "addscolumn" do |t|
+      t.string :text
+      t.integer :number
+      t.timestamps
+    end
+
+    create_random_rows("addscolumn", 1200)
+
+    ghost = AddNewColumn.perform(false)
+
+    truthiness_rows_count(ghost + "_changes", 0)
+    create_random_rows("addscolumn", 1, 1200)
+    truthiness_rows_count(ghost + "_changes", 1)
+
+    AddNewColumn.finalize!
 
     truthiness_rows "addscolumn", ghost
   end
@@ -196,7 +208,7 @@ describe "LargeHadronMigration", "triggers" do
     end
   end
 
-  it "should trigger on inser, update and delete" do
+  it "should trigger on insert, update and delete" do
     LargeHadronMigration.add_trigger_on_action \
       "triggerme",
       "triggerme_changes",

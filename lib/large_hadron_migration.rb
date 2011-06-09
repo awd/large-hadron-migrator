@@ -88,68 +88,66 @@ class LargeHadronMigration < ActiveRecord::Migration
   def self.large_hadron_migrate(curr_table, *args, &block)
     opts = args.extract_options!.reverse_merge :wait => 0.5,
         :chunk_size => 35_000,
-        :id_window => 11_000
+        :id_window => 11_000,
+        :finalize => true
 
-    curr_table = curr_table.to_s
-    chunk_size = opts[:chunk_size].to_i
+    @curr_table = curr_table.to_s
+    @chunk_size = opts[:chunk_size].to_i
 
     # we are in dev/test mode - so speed it up
-    chunk_size = 10_000_000.to_i if Rails.env.development? or Rails.env.test?
-    wait = opts[:wait].to_f
+    @chunk_size = 10_000_000.to_i if Rails.env.development? or Rails.env.test?
+    @wait = opts[:wait].to_f
     id_window = opts[:id_window]
+    finalize = opts[:finalize]
 
-    raise "chunk_size must be >= 1" unless chunk_size >= 1
+    raise "chunk_size must be >= 1" unless @chunk_size >= 1
 
-    new_table      = "new_#{curr_table}"
-    old_table      = "%s_#{curr_table}" % Time.now.strftime("%Y_%m_%d_%H_%M_%S_%3N")
-    journal_table  = "#{old_table}_changes"
+    @new_table      = "new_#{@curr_table}"
+    @old_table      = "%s_#{@curr_table}" % Time.now.strftime("%Y_%m_%d_%H_%M_%S_%3N")
+    @journal_table  = "#{@old_table}_changes"
 
-    last_insert_id = last_insert_id(curr_table)
-    say "last inserted id in #{curr_table}: #{last_insert_id}"
+    last_insert_id = last_insert_id(@curr_table)
+    say "last inserted id in #{@curr_table}: #{last_insert_id}"
 
-    begin
-      # clean tables. old tables are never deleted to guard against rollbacks.
-      execute %Q/drop table if exists %s/ % new_table
+    # clean tables. old tables are never deleted to guard against rollbacks.
+    execute %Q/drop table if exists %s/ % @new_table
 
-      clone_table(curr_table, new_table, id_window)
-      clone_table_for_changes(curr_table, journal_table)
+    clone_table(@curr_table, @new_table, id_window)
+    clone_table_for_changes(@curr_table, @journal_table)
 
-      # add triggers
-      add_trigger_on_action(curr_table, journal_table, "insert")
-      add_trigger_on_action(curr_table, journal_table, "update")
-      add_trigger_on_action(curr_table, journal_table, "delete")
+    # add triggers
+    add_trigger_on_action(@curr_table, @journal_table, "insert")
+    add_trigger_on_action(@curr_table, @journal_table, "update")
+    add_trigger_on_action(@curr_table, @journal_table, "delete")
 
-      # alter new table
-      default_values = {}
-      yield new_table, default_values
+    # alter new table
+    default_values = {}
+    yield @new_table, default_values
 
-      insertion_columns = prepare_insertion_columns(new_table, curr_table, default_values)
-      raise "insertion_columns empty" if insertion_columns.empty?
+    insertion_columns = prepare_insertion_columns(@new_table, @curr_table, default_values)
+    raise "insertion_columns empty" if insertion_columns.empty?
 
-      chunked_insert \
-        last_insert_id,
-        chunk_size,
-        new_table,
-        insertion_columns,
-        curr_table,
-        wait
+    chunked_insert \
+      last_insert_id,
+      @chunk_size,
+      @new_table,
+      insertion_columns,
+      @curr_table,
+      @wait
 
-      swap_and_replay(curr_table, old_table, new_table, chunk_size, wait)
+    finalize! if finalize
 
-      old_table
-    ensure
-      cleanup(curr_table)
-    end
+    @old_table
   end
 
-  def self.swap_and_replay(curr_table, old_table, new_table, chunk_size, wait)
-    rename_tables curr_table => old_table, new_table => curr_table
-    cleanup(curr_table)
+  def self.finalize!
+    rename_tables @curr_table => @old_table, @new_table => @curr_table
+    cleanup(@curr_table)
 
     # replay changes from the changes jornal
-    replay_insert_changes(curr_table, journal_table, chunk_size, wait)
-    replay_update_changes(curr_table, journal_table, chunk_size, wait)
-    replay_delete_changes(curr_table, journal_table)
+    replay_insert_changes(@curr_table, @journal_table, @chunk_size, @wait)
+    replay_update_changes(@curr_table, @journal_table, @chunk_size, @wait)
+    replay_delete_changes(@curr_table, @journal_table)
   end
 
   def self.prepare_insertion_columns(new_table, table, default_values = {})
