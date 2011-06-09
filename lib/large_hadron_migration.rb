@@ -134,18 +134,22 @@ class LargeHadronMigration < ActiveRecord::Migration
         curr_table,
         wait
 
-      rename_tables curr_table => old_table, new_table => curr_table
-      cleanup(curr_table)
-
-      # replay changes from the changes jornal
-      replay_insert_changes(curr_table, journal_table, chunk_size, wait)
-      replay_update_changes(curr_table, journal_table, chunk_size, wait)
-      replay_delete_changes(curr_table, journal_table)
+      swap_and_replay(curr_table, old_table, new_table, chunk_size, wait)
 
       old_table
     ensure
       cleanup(curr_table)
     end
+  end
+
+  def self.swap_and_replay(curr_table, old_table, new_table, chunk_size, wait)
+    rename_tables curr_table => old_table, new_table => curr_table
+    cleanup(curr_table)
+
+    # replay changes from the changes jornal
+    replay_insert_changes(curr_table, journal_table, chunk_size, wait)
+    replay_update_changes(curr_table, journal_table, chunk_size, wait)
+    replay_delete_changes(curr_table, journal_table)
   end
 
   def self.prepare_insertion_columns(new_table, table, default_values = {})
